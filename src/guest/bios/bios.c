@@ -4,6 +4,7 @@
 #include "guest/aica/aica.h"
 #include "guest/bios/bios.h"
 #include "guest/bios/flash.h"
+#include "guest/bios/scramble.h"
 #include "guest/bios/syscalls.h"
 #include "guest/dreamcast.h"
 #include "guest/gdrom/gdrom.h"
@@ -13,19 +14,6 @@
 #include "guest/sh4/sh4.h"
 #include "options.h"
 
-/* system settings */
-static const char *regions[] = {
-    "japan", "usa", "europe",
-};
-
-static const char *languages[] = {
-    "japanese", "english", "german", "french", "spanish", "italian",
-};
-
-static const char *broadcasts[] = {
-    "ntsc", "pal", "pal_m", "pal_n",
-};
-
 /* address of syscall vectors */
 enum {
   VECTOR_SYSINFO = 0x0c0000b0,
@@ -33,7 +21,7 @@ enum {
   VECTOR_FLASHROM = 0x0c0000b8,
   VECTOR_GDROM = 0x0c0000bc,
   VECTOR_GDROM2 = 0x0c0000c0,
-  VECTOR_MENU = 0x0c0000e0,
+  VECTOR_SYSTEM = 0x0c0000e0,
 };
 
 /* address of syscall entrypoints */
@@ -43,7 +31,7 @@ enum {
   SYSCALL_FLASHROM = 0x0c003d00,
   SYSCALL_GDROM = 0x0c001000,
   SYSCALL_GDROM2 = 0x0c0010f0,
-  SYSCALL_MENU = 0x0c000800,
+  SYSCALL_SYSTEM = 0x0c000800,
 };
 
 static uint32_t bios_local_time() {
@@ -76,29 +64,29 @@ static void bios_override_settings(struct bios *bios) {
   int bcast = 0;
   uint32_t time = bios_local_time();
 
-  for (int i = 0; i < ARRAY_SIZE(regions); i++) {
-    if (!strcmp(OPTION_region, regions[i])) {
+  for (int i = 0; i < NUM_REGIONS; i++) {
+    if (!strcmp(OPTION_region, REGIONS[i])) {
       region = i;
       break;
     }
   }
 
-  for (int i = 0; i < ARRAY_SIZE(languages); i++) {
-    if (!strcmp(OPTION_language, languages[i])) {
+  for (int i = 0; i < NUM_LANGUAGES; i++) {
+    if (!strcmp(OPTION_language, LANGUAGES[i])) {
       lang = i;
       break;
     }
   }
 
-  for (int i = 0; i < ARRAY_SIZE(broadcasts); i++) {
-    if (!strcmp(OPTION_broadcast, broadcasts[i])) {
+  for (int i = 0; i < NUM_BROADCASTS; i++) {
+    if (!strcmp(OPTION_broadcast, BROADCASTS[i])) {
       bcast = i;
       break;
     }
   }
 
   LOG_INFO("bios_override_settings region=%s lang=%s bcast=%s time=0x%08x",
-           regions[region], languages[lang], broadcasts[bcast], time);
+           REGIONS[region], LANGUAGES[lang], BROADCASTS[bcast], time);
 
   /* the region, language and broadcast settings exist in two locations:
 
@@ -209,7 +197,34 @@ static void bios_validate_flash(struct bios *bios) {
   }
 }
 
-static void bios_boot(struct bios *bios) {
+static int bios_post_init(struct device *dev) {
+  struct bios *bios = (struct bios *)dev;
+
+  bios_validate_flash(bios);
+
+  bios_override_settings(bios);
+
+#if 0
+  /* this code enables a "hybrid" hle mode. in this mode, syscalls are patched
+     to trap into their hle handlers, but the real bios can still be ran to
+     test if bugs exist in the syscall emulation or bootstrap emulation. note,
+     the boot rom does a bootstrap on startup which copies the boot rom into
+     system ram. due to this, the invalid instructions are written to the
+     original rom, not the system ram (or else, they would be overwritten by
+     the bootstrap process) */
+  struct boot *boot = bios->dc->boot;
+  boot_rom_write(boot, SYSCALL_FONTROM - SH4_AREA3_BEGIN, 0x0, 0xffff);
+  boot_rom_write(boot, SYSCALL_SYSINFO - SH4_AREA3_BEGIN, 0x0, 0xffff);
+  boot_rom_write(boot, SYSCALL_FLASHROM - SH4_AREA3_BEGIN, 0x0, 0xffff);
+  boot_rom_write(boot, SYSCALL_GDROM - SH4_AREA3_BEGIN, 0x0, 0xffff);
+  boot_rom_write(boot, SYSCALL_GDROM2 - SH4_AREA3_BEGIN, 0x0, 0xffff);
+  boot_rom_write(boot, SYSCALL_SYSTEM - SH4_AREA3_BEGIN, 0x0, 0xffff);
+#endif
+
+  return 1;
+}
+
+void bios_boot(struct bios *bios) {
   struct dreamcast *dc = bios->dc;
   struct flash *flash = dc->flash;
   struct gdrom *gd = dc->gdrom;
@@ -222,7 +237,7 @@ static void bios_boot(struct bios *bios) {
 
   LOG_INFO("bios_boot using hle bootstrap");
 
-  if (!gdrom_has_disc(gd)) {
+  if (!gdrom_get_disc(gd)) {
     LOG_FATAL("bios_boot failed, no disc is loaded");
     return;
   }
@@ -258,6 +273,18 @@ static void bios_boot(struct bios *bios) {
       return;
     }
 
+    /* CD-ROM XA discs have their binary scrambled. the bios descrambles this
+       later on in the boot, but it should be fine to descramble now */
+    struct gd_status_info stat;
+    gdrom_get_status(gd, &stat);
+
+    if (stat.format == GD_DISC_CDROM_XA) {
+      uint8_t *tmp2 = malloc(len);
+      descramble(tmp2, tmp, len);
+      free(tmp);
+      tmp = tmp2;
+    }
+
     sh4_memcpy_to_guest(dc->mem, BOOT2_ADDR, tmp, read);
     free(tmp);
   }
@@ -289,38 +316,11 @@ static void bios_boot(struct bios *bios) {
     sh4_write32(dc->mem, VECTOR_FLASHROM, SYSCALL_FLASHROM);
     sh4_write32(dc->mem, VECTOR_GDROM, SYSCALL_GDROM);
     sh4_write32(dc->mem, VECTOR_GDROM2, SYSCALL_GDROM2);
-    sh4_write32(dc->mem, VECTOR_MENU, SYSCALL_MENU);
+    sh4_write32(dc->mem, VECTOR_SYSTEM, SYSCALL_SYSTEM);
   }
 
-  /* start executing at license screen code inside of ip.bin */
+  /* start executing at license screen code inside of IP.BIN */
   ctx->pc = 0xac008300;
-}
-
-static int bios_post_init(struct device *dev) {
-  struct bios *bios = (struct bios *)dev;
-
-  bios_validate_flash(bios);
-
-  bios_override_settings(bios);
-
-#if 0
-  /* this code enables a "hybrid" hle mode. in this mode, syscalls are patched
-     to trap into their hle handlers, but the real bios can still be ran to
-     test if bugs exist in the syscall emulation or bootstrap emulation. note,
-     the boot rom does a bootstrap on startup which copies the boot rom into
-     system ram. due to this, the invalid instructions are written to the
-     original rom, not the system ram (or else, they would be overwritten by
-     the bootstrap process) */
-  struct boot *boot = bios->dc->boot;
-  boot_rom_write(boot, SYSCALL_FONTROM - SH4_AREA3_BEGIN, 0x0, 0xffff);
-  boot_rom_write(boot, SYSCALL_SYSINFO - SH4_AREA3_BEGIN, 0x0, 0xffff);
-  boot_rom_write(boot, SYSCALL_FLASHROM - SH4_AREA3_BEGIN, 0x0, 0xffff);
-  boot_rom_write(boot, SYSCALL_GDROM - SH4_AREA3_BEGIN, 0x0, 0xffff);
-  boot_rom_write(boot, SYSCALL_GDROM2 - SH4_AREA3_BEGIN, 0x0, 0xffff);
-  boot_rom_write(boot, SYSCALL_MENU - SH4_AREA3_BEGIN, 0x0, 0xffff);
-#endif
-
-  return 1;
 }
 
 int bios_invalid_instr(struct bios *bios) {
@@ -355,8 +355,8 @@ int bios_invalid_instr(struct bios *bios) {
       bios_gdrom_vector(bios);
       break;
 
-    case SYSCALL_MENU:
-      bios_menu_vector(bios);
+    case SYSCALL_SYSTEM:
+      bios_system_vector(bios);
       break;
 
     default:

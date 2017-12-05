@@ -16,12 +16,13 @@ enum {
   IMFONT_NUM_FONTS,
 };
 
+/* note, any icon defined through IMICON_* must be listed here */
 #define IMICON_RANGES                                                     \
-  0xf00d, 0xf00d, 0xf028, 0xf028, 0xf067, 0xf067, 0xf07c, 0xf07c, 0xf0a0, \
+  0xf00d, 0xf00d, 0xf2db, 0xf2db, 0xf067, 0xf067, 0xf07c, 0xf07c, 0xf0a0, \
       0xf0a0, 0xf108, 0xf108, 0xf11b, 0xf11b
 
 #define IMICON_TIMES u8"\uf00d"
-#define IMICON_VOLUME_UP u8"\uf028"
+#define IMICON_MICROCHIP u8"\uf2db"
 #define IMICON_PLUS u8"\uf067"
 #define IMICON_FOLDER_OPEN u8"\uf07c"
 #define IMICON_HDD u8"\uf0a0"
@@ -48,7 +49,7 @@ void imgui_destroy(struct imgui *imgui);
 void imgui_vid_created(struct imgui *imgui, struct render_backend *r);
 void imgui_vid_destroyed(struct imgui *imgui);
 void imgui_mousemove(struct imgui *imgui, int x, int y);
-int imgui_keydown(struct imgui *imgui, int key, uint16_t value);
+int imgui_keydown(struct imgui *imgui, int key, int16_t value);
 
 void imgui_begin_frame(struct imgui *imgui);
 void imgui_end_frame(struct imgui *imgui);

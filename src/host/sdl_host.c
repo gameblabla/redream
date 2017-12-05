@@ -24,11 +24,6 @@
 #define VIDEO_DEFAULT_HEIGHT 480
 #define INPUT_MAX_CONTROLLERS 4
 
-/* Default deadzone size taken from this thread https://forums.libsdl.org/viewtopic.php?p=39985 (specifically talks about xbox 360 controllers. 
-   Other sources also have it around this number. 
-   */
-#define DEFAULT_DEADZONE 4096
-
 #define AUDIO_FRAME_SIZE 4 /* stereo / pcm16 */
 #define AUDIO_FRAMES_TO_MS(frames) \
   (int)(((float)frames * 1000.0f) / (float)AUDIO_FREQ)
@@ -60,7 +55,7 @@ struct host {
   } video;
 
   struct {
-    int keymap[K_NUM_KEYS];
+    struct button_map *keymap[K_NUM_KEYS];
     SDL_GameController *controllers[INPUT_MAX_CONTROLLERS];
   } input;
 
@@ -514,6 +509,21 @@ static int translate_sdl_key(SDL_Keysym keysym) {
   return out;
 }
 
+static int16_t filter_sdl_motion(int16_t value, int deadzone) {
+  CHECK(deadzone >= 0 && deadzone <= INT16_MAX);
+
+  /* maximum input value after accounting for the deadzone */
+  float deadmax = (float)(INT16_MAX - deadzone);
+
+  if (value < -deadzone) {
+    value = (int16_t)((((float)value + deadzone) / deadmax) * INT16_MAX);
+  } else if (value > deadzone) {
+    value = (int16_t)((((float)value - deadzone) / deadmax) * INT16_MAX);
+  }
+
+  return value;
+}
+
 static int input_find_controller_port(struct host *host, int instance_id) {
   for (int port = 0; port < INPUT_MAX_CONTROLLERS; port++) {
     SDL_GameController *ctrl = host->input.controllers[port];
@@ -531,10 +541,10 @@ static void input_update_keymap(struct host *host) {
   memset(host->input.keymap, 0, sizeof(host->input.keymap));
 
   for (int i = 0; i < NUM_BUTTONS; i++) {
-    struct button_map *btnmap = &BUTTONS[i];
+    struct button_map *mapping = &BUTTONS[i];
 
-    if (btnmap->key) {
-      host->input.keymap[*btnmap->key] = K_CONT_C + i;
+    if (mapping->key) {
+      host->input.keymap[*mapping->key] = mapping;
     }
   }
 }
@@ -543,11 +553,19 @@ static void input_mousemove(struct host *host, int port, int x, int y) {
   imgui_mousemove(host->imgui, x, y);
 }
 
-static void input_keydown(struct host *host, int port, int key,
-                          uint16_t value) {
-  /* send event for both the original key as well as the mapped button, if a
-     mapping is available */
-  int mapping = host->input.keymap[key];
+static void input_keydown(struct host *host, int port, int key, int16_t value) {
+  /* send event for both the key as well the button it's mapped to (if any) */
+  struct button_map *mapping = host->input.keymap[key];
+  int button = K_UNKNOWN;
+
+  if (mapping) {
+    button = mapping->btn;
+
+    /* if the mapping is to a negative axis, flip the value */
+    if (mapping->dir == DIR_NEG) {
+      value = -value;
+    }
+  }
 
   if (key == K_F1 && value) {
     host->dbg.show_menu = !host->dbg.show_menu;
@@ -573,7 +591,8 @@ static void input_keydown(struct host *host, int port, int key,
 
     imgui_keydown(host->imgui, key, value);
 
-    key = mapping;
+    /* send event for mapped button as well */
+    key = button;
   }
 }
 
@@ -620,17 +639,6 @@ static void input_shutdown(struct host *host) {
 static int input_init(struct host *host) {
   /* reset */
   memset(&host->input, 0, sizeof(host->input));
-
-  /* SDL won't push events for joysticks which are already connected at init */
-  int num_joysticks = SDL_NumJoysticks();
-
-  for (int device_id = 0; device_id < num_joysticks; device_id++) {
-    if (!SDL_IsGameController(device_id)) {
-      continue;
-    }
-
-    input_controller_added(host, device_id);
-  }
 
   input_update_keymap(host);
 
@@ -686,43 +694,6 @@ static void host_debug_menu(struct host *host) {
 
   if (igBeginMainMenuBar()) {
     if (igBeginMenu("HOST", 1)) {
-      if (igBeginMenu("sync", 1)) {
-        struct {
-          const char *desc;
-          int enabled;
-        } options[] = {
-            {"audio", audio_sync_enabled()}, /* */
-            {"video", video_sync_enabled()}, /* */
-        };
-        int num_options = (int)ARRAY_SIZE(options);
-
-        for (int i = 0; i < num_options; i++) {
-          const char *desc = options[i].desc;
-          int enabled = options[i].enabled;
-
-          if (igMenuItem(desc, NULL, enabled, 1)) {
-            int len = (int)strlen(OPTION_sync);
-
-            if (enabled) {
-              for (int i = 0; i < len; i++) {
-                if (OPTION_sync[i] == desc[0]) {
-                  OPTION_sync[i] = OPTION_sync[len - 1];
-                  OPTION_sync[len - 1] = 0;
-                  break;
-                }
-              }
-            } else {
-              OPTION_sync[len] = desc[0];
-              OPTION_sync[len + 1] = 0;
-            }
-
-            OPTION_sync_dirty = 1;
-          }
-        }
-
-        igEndMenu();
-      }
-
       if (igMenuItem("frame times", NULL, host->dbg.show_times, 1)) {
         host->dbg.show_times = !host->dbg.show_times;
       }
@@ -776,7 +747,7 @@ static void host_poll_events(struct host *host) {
         int keycode = translate_sdl_key(ev.key.keysym);
 
         if (keycode != K_UNKNOWN) {
-          input_keydown(host, 0, keycode, KEY_DOWN);
+          input_keydown(host, 0, keycode, INT16_MAX);
         }
       } break;
 
@@ -784,7 +755,7 @@ static void host_poll_events(struct host *host) {
         int keycode = translate_sdl_key(ev.key.keysym);
 
         if (keycode != K_UNKNOWN) {
-          input_keydown(host, 0, keycode, KEY_UP);
+          input_keydown(host, 0, keycode, 0);
         }
       } break;
 
@@ -814,18 +785,18 @@ static void host_poll_events(struct host *host) {
         }
 
         if (keycode != K_UNKNOWN) {
-          uint16_t value = ev.type == SDL_MOUSEBUTTONDOWN ? KEY_DOWN : KEY_UP;
+          int16_t value = ev.type == SDL_MOUSEBUTTONDOWN ? INT16_MAX : 0;
           input_keydown(host, 0, keycode, value);
         }
       } break;
 
       case SDL_MOUSEWHEEL:
         if (ev.wheel.y > 0) {
-          input_keydown(host, 0, K_MWHEELUP, KEY_DOWN);
-          input_keydown(host, 0, K_MWHEELUP, KEY_UP);
+          input_keydown(host, 0, K_MWHEELUP, INT16_MAX);
+          input_keydown(host, 0, K_MWHEELUP, 0);
         } else {
-          input_keydown(host, 0, K_MWHEELDOWN, KEY_DOWN);
-          input_keydown(host, 0, K_MWHEELDOWN, KEY_UP);
+          input_keydown(host, 0, K_MWHEELDOWN, INT16_MAX);
+          input_keydown(host, 0, K_MWHEELDOWN, 0);
         }
         break;
 
@@ -848,29 +819,14 @@ static void host_poll_events(struct host *host) {
       case SDL_CONTROLLERAXISMOTION: {
         int port = input_find_controller_port(host, ev.caxis.which);
         int key = K_UNKNOWN;
-		uint16_t value = 0;
 
-		int result = 0;
-
-		if (port >= 0) {
-			if (ev.caxis.value < -*(deadzones[port])) {
-				result = ev.caxis.value + *(deadzones[port]);
-			}
-			else if (ev.caxis.value > *(deadzones[port])) {
-				result = ev.caxis.value - *(deadzones[port]);
-			}
-		}
-
-        /* SDL provides axis input in the range of [INT16_MIN, INT16_MAX],
-           convert to [0, UINT16_MAX] */
-        int dir = axis_s16_to_u16(result, &value);
 
         switch (ev.caxis.axis) {
           case SDL_CONTROLLER_AXIS_LEFTX:
-            key = K_CONT_JOYX_NEG + dir;
+            key = K_CONT_JOYX;
             break;
           case SDL_CONTROLLER_AXIS_LEFTY:
-            key = K_CONT_JOYY_NEG + dir;
+            key = K_CONT_JOYY;
             break;
           case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
             key = K_CONT_LTRIG;
@@ -881,6 +837,7 @@ static void host_poll_events(struct host *host) {
         }
 
         if (port != -1 && key != K_UNKNOWN) {
+          int16_t value = filter_sdl_motion(ev.caxis.value, *DEADZONES[port]);
           input_keydown(host, port, key, value);
         }
       } break;
@@ -889,8 +846,7 @@ static void host_poll_events(struct host *host) {
       case SDL_CONTROLLERBUTTONUP: {
         int port = input_find_controller_port(host, ev.cbutton.which);
         int key = K_UNKNOWN;
-        uint16_t value =
-            ev.type == SDL_CONTROLLERBUTTONDOWN ? KEY_DOWN : KEY_UP;
+        int16_t value = ev.type == SDL_CONTROLLERBUTTONDOWN ? INT16_MAX : 0;
 
         switch (ev.cbutton.button) {
           case SDL_CONTROLLER_BUTTON_A:
@@ -957,19 +913,19 @@ static void host_poll_events(struct host *host) {
     OPTION_sync_dirty = 0;
   }
 
-  /* update reverse button map when optionsc hange */
+  /* update reverse button map when options change */
   int dirty_map = 0;
 
   for (int i = 0; i < NUM_BUTTONS; i++) {
-    struct button_map *btnmap = &BUTTONS[i];
+    struct button_map *mapping = &BUTTONS[i];
 
-    if (!btnmap->desc) {
+    if (!mapping->desc) {
       continue;
     }
 
-    if (*btnmap->dirty) {
+    if (*mapping->dirty) {
       dirty_map = 1;
-      *btnmap->dirty = 0;
+      *mapping->dirty = 0;
     }
   }
 
