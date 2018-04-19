@@ -277,8 +277,17 @@ static SDL_GLContext video_create_context(struct host *host) {
 
   /* force vsync */
   int vsync = video_sync_enabled();
-  int res = SDL_GL_SetSwapInterval(vsync);
-  CHECK_EQ(res, 0, "video_create_context failed to set swap interval");
+  int res;
+  res = SDL_GL_SetSwapInterval(vsync);
+  /* For some reasons, this doesn't work properly on my Devuan testing desktop with Intel graphics.
+   * I made it optional instead, it works fine without it.
+   * - Gameblabla
+   * */
+  if (res == 0)
+  {
+	  printf("video_create_context failed to set swap interval\n");
+  }
+  //CHECK_EQ(res, 0, "video_create_context failed to set swap interval");
 
   /* link in gl functions at runtime */
   res = gladLoadGLLoader((GLADloadproc)&SDL_GL_GetProcAddress);
@@ -948,7 +957,7 @@ static int host_init(struct host *host) {
   CHECK_GE(res, 0, "host_create sdl initialization failed: %s", SDL_GetError());
 
   uint32_t win_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
-  host->win = SDL_CreateWindow("redream", SDL_WINDOWPOS_UNDEFINED,
+  host->win = SDL_CreateWindow("GreedyDream", SDL_WINDOWPOS_UNDEFINED,
                                SDL_WINDOWPOS_UNDEFINED, VIDEO_DEFAULT_WIDTH,
                                VIDEO_DEFAULT_HEIGHT, win_flags);
   CHECK_NOTNULL(host->win, "host_create window creation failed: %s",
@@ -989,7 +998,7 @@ struct host *host_create() {
 }
 
 int main(int argc, char **argv) {
-  LOG_INFO("redream " GIT_VERSION);
+  LOG_INFO("GreedyDream " GIT_VERSION);
 
 #if PLATFORM_ANDROID
   const char *appdir = SDL_AndroidGetExternalStoragePath();
