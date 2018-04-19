@@ -1,44 +1,59 @@
-# redream
+# GreedyDream
 
-[![travis-ci status](https://travis-ci.org/inolen/redream.svg?branch=master)](https://travis-ci.org/inolen/redream)
-[![appveyor status](https://ci.appveyor.com/api/projects/status/github/inolen/redream)](https://ci.appveyor.com/project/inolen/redream)
-[![slack status](http://slack.redream.io/badge.svg)](http://slack.redream.io)
+GreedyDream is basically me stealing Redream plus the numerous forks out there and combine it together into one thing.
 
-[redream](http://redream.io) is a work-in-progress SEGA Dreamcast emulator written in C for Mac, Linux and Windows.
+Throw money at me, i love money ! I would do anything for money. 
 
-redream is licensed under the GPLv3 license (see [LICENSE.txt](LICENSE.txt)) and uses third party libraries that are each distributed under their own terms (see each library's license in [deps/](deps/)).
+And Sega please, buy my emulator so we can sell it and feature it as part of Sega forever !
 
-Ask questions and help answer them on [our Slack group](http://slack.redream.io).
+However, you must rispect the GPLv3 license (see [LICENSE.txt](LICENSE.txt)) as well as the third party libraries that are each distributed under their own terms (see each library's license in [deps/](deps/)).
+
+Don't ask questions ! Go ask your questions on Stackoverflow instead.
 
 ## Downloading
 
-The latest pre-built binaries can be found on the [downloads](http://redream.io/download) page.
+There are no pre-built binaries because i am homosexual and homosexuals prefer to build from source.
+
+However for your conveniance, i have provided a Makefile as well. 
+
+You can use it to cross-compile it. (although it won't be that useful with only a JIT for x86_64...)
 
 ## Building
 
 Start by cloning the repository and setting up a build directory.
 
 ```
-git clone https://github.com/inolen/redream.git
-mkdir redream_build
-cd redream_build
+git clone https://github.com/gameblabla/redream.git
+make -j7
+```
+
+Boom, no cmake crap.
+
+However, if you are straight and uses cmake, do the following instead :
+
+```
+git clone https://github.com/gameblabla/redream.git
+mkdir greedydream_build
+cd greedydream_build
 ```
 
 Next, generate a makefile or project file for your IDE of choice. For more info on the supported IDEs, checkout the [CMake documentation](http://www.cmake.org/cmake/help/latest/manual/cmake-generators.7.html).
 
 ```
 # Makefile
-cmake -DCMAKE_BUILD_TYPE=RELEASE ../redream
+cmake -DCMAKE_BUILD_TYPE=RELEASE ../greedydream
 
 # Xcode project
-cmake -G "Xcode" ../redream
+cmake -G "Xcode" ../greedydream
 
 # Visual Studio project
-cmake -G "Visual Studio 14 Win64" ../redream
+cmake -G "Visual Studio 14 Win64" ../greedydream
 ```
 
-Finally, you can either run `make` from the command line if you've generated a Makefile or load up the project file and compile the code from inside of your IDE.
+Only then you can type `make` from the command line or load up the project file and compile the code from inside of your IDE. (aka that piece of shit of Visual Studio)
 
 ## Reporting bugs
 
-Report bugs via the [GitHub issue queue](https://github.com/inolen/redream/issues).
+Do not report bugs because, again, i am homosexual and thus i am unable to fix bugs.
+
+C'est la vie
