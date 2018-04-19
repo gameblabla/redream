@@ -296,18 +296,23 @@ static SDL_GLContext video_create_context(struct host *host) {
   return ctx;
 }
 
-static void video_set_fullscreen(struct host *host, int fullscreen) {
-  if (fullscreen) {
-    int res = SDL_SetWindowFullscreen(host->win, SDL_WINDOW_FULLSCREEN_DESKTOP);
-    CHECK(res >= 0);
-    res = SDL_ShowCursor(SDL_DISABLE);
-    CHECK(res >= 0);
-  } else {
-    int res = SDL_SetWindowFullscreen(host->win, 0);
-    CHECK(res >= 0);
-    res = SDL_ShowCursor(SDL_ENABLE);
-    CHECK(res >= 0);
-  }
+static void video_set_fullscreen(struct host *host, int fullscreen) 
+{
+	int res;
+	if (fullscreen) 
+	{
+		res = SDL_SetWindowFullscreen(host->win, SDL_WINDOW_FULLSCREEN_DESKTOP);
+		CHECK(res >= 0);
+		res = SDL_ShowCursor(SDL_ENABLE);
+		CHECK(res >= 0);
+	} 
+	else 
+	{
+		int res = SDL_SetWindowFullscreen(host->win, 0);
+		CHECK(res >= 0);
+		res = SDL_ShowCursor(SDL_ENABLE);
+		CHECK(res >= 0);
+	}
 }
 
 static void video_shutdown(struct host *host) {
@@ -580,7 +585,13 @@ static void input_keydown(struct host *host, int port, int key, int16_t value) {
     host->dbg.show_menu = !host->dbg.show_menu;
     return;
   }
-
+  else if (key == K_F12 && value) {
+	  video_set_fullscreen(host, 1);
+  }
+  else if (key == K_F11 && value) {
+	  video_set_fullscreen(host, 0);
+  }
+  
   for (int i = 0; i < 2; i++) {
     if (key == K_UNKNOWN) {
       break;
@@ -672,8 +683,15 @@ void ui_closed(struct host *host) {}
 
 void ui_opened(struct host *host) {}
 
-int ui_load_game(struct host *host, const char *path) {
-  return emu_load(host->emu, path);
+int ui_load_game(struct host *host, const char *path) 
+{
+	int res;
+	if (OPTION_fullscreen)
+	{
+		res = SDL_ShowCursor(SDL_DISABLE);
+		CHECK(res >= 0);
+	}
+	return emu_load(host->emu, path);
 }
 
 /*
